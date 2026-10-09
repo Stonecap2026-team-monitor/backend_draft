@@ -1,0 +1,77 @@
+# =========================
+# Python virtual environment
+# =========================
+.venv/
+venv/
+env/
+
+# =========================
+# Python cache / compiled files
+# =========================
+__pycache__/
+*.py[cod]
+
+# =========================
+# Environment variables / secrets
+# =========================
+.env
+.env.*
+!.env.example
+
+# =========================
+# Local databases
+# =========================
+*.db
+*.sqlite
+*.sqlite3
+
+# =========================
+# Logs
+# =========================
+*.log
+
+# =========================
+# Private keys / certificates
+# =========================
+*.pem
+*.key
+*.p12
+*.pfx
+
+# =========================
+# IDE / Editor local settings
+# =========================
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# =========================
+# OS-generated files
+# =========================
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# =========================
+# Python testing / coverage
+# =========================
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# =========================
+# Python type-checker / linter caches
+# =========================
+.mypy_cache/
+.ruff_cache/
+
+# =========================
+# Python build / packaging output
+# =========================
+build/
+dist/
+*.egg-info/
+.eggs/
