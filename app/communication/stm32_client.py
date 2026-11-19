@@ -52,7 +52,9 @@ class STM32Client:
 
         self.write_lock = threading.Lock()
         # 紐⑦꽣 紐낅졊�� �숈떆�� �섎굹留� �ㅽ뻾
-        self.command_lock = threading.Lock()
+        # RLock allows the relative-move transaction to call set_target()
+        # while holding the same command lock (avoids interleaved commands).
+        self.command_lock = threading.RLock()
         # COMMAND_DONE / ERROR ��湲곗슜
         self.command_done_event = threading.Event()
         self.command_error_event = threading.Event()
@@ -435,6 +437,34 @@ class STM32Client:
             frame,
             timeout_sec=10.0
         )
+
+
+    def move_axis_relative(self, axis: int, delta_deg: float) -> bool:
+        """Use one absolute SET_TARGET for a relative preset move.
+
+        Read last reported command angles only after any prior command finishes.
+        Physical angle limits and final safety remain STM32 responsibilities.
+        """
+        if axis not in (AXIS_THETA1, AXIS_THETA2, AXIS_THETA3):
+            raise ValueError("axis must be 1, 2 or 3")
+        if delta_deg not in (-20.0, -10.0, -5.0, 5.0, 10.0, 20.0):
+            raise ValueError("preset delta must be +/-5, +/-10 or +/-20")
+
+        with self.command_lock:
+            angles = [
+                self.current_theta1_deg,
+                self.current_theta2_deg,
+                self.current_theta3_deg,
+            ]
+            if any(angle is None for angle in angles):
+                raise RuntimeError("STM32 command angles not yet available")
+
+            angles[axis - 1] = round(angles[axis - 1] + delta_deg, 1)
+            # Protocol represents each target angle as a signed int16 x10.
+            if not -3276.8 <= angles[axis - 1] <= 3276.7:
+                raise RuntimeError("Target outside UART int16 range")
+
+            return self.set_target(*angles)
 
 
     # ========================================================
