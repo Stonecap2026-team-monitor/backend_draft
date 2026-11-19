@@ -54,6 +54,12 @@ class MotorJogRequest(SQLModel):
 
 
 
+# 5/10/20 degree presets use one SET_TARGET rather than repeated 1 degree JOGs.
+class MotorPresetMoveRequest(SQLModel):
+    axis: Literal[1, 2, 3]
+    delta_deg: Literal[-20.0, -10.0, -5.0, 5.0, 10.0, 20.0]
+
+
 class HomeSaveRequest(SQLModel):
     theta1: float
     theta2: float
