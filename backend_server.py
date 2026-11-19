@@ -9,7 +9,7 @@ from sqlmodel import SQLModel, Session, select
 
 from database import create_db_and_tables, engine
 from models import User, PostureBaseline, HomePosition
-from schemas import (UserCreate, UserPublic, UserLogin, Token, HomePositionPublic, HomeSaveRequest, MotorJogRequest, PostureBaselineData, PostureBaselinePublic, CurrentPostureData, PostureComparisonPublic)
+from schemas import (UserCreate, UserPublic, UserLogin, Token, HomePositionPublic, HomeSaveRequest, MotorJogRequest, MotorPresetMoveRequest, PostureBaselineData, PostureBaselinePublic, CurrentPostureData, PostureComparisonPublic)
 from security import hash_password, verify_password, create_access_token
 from security import (
     create_access_token,
@@ -20,7 +20,7 @@ from security import (
 from app.communication.stm32_client import STM32Client
 from app.communication.stm32_simulator import STM32Simulator
 import serial
-
+ 
 import os
 from pathlib import Path
 from dotenv import load_dotenv
@@ -177,6 +177,8 @@ def read_current_user(
     current_user: User = Depends(get_current_user),
 ):
     return current_user
+    
+
 @app.get("/")
 def read_root():
     return {"message": "Smart Monitor Arm Backend"}
@@ -330,19 +332,65 @@ def motor_jog(
     )
 
 
+@app.post("/api/motor/move-relative")
+def motor_move_relative(
+    move_data: MotorPresetMoveRequest,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+):
+    """Move one axis by 5, 10 or 20 degrees in a single SET_TARGET command."""
+    stm32 = request.app.state.stm32
+
+    if stm32 is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="STM32가 연결되어 있지 않습니다.",
+        )
+
+    try:
+        success = stm32.move_axis_relative(move_data.axis, move_data.delta_deg)
+    except (RuntimeError, serial.SerialException):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="STM32 현재 각도 또는 통신 상태를 확인할 수 없습니다.",
+        )
+
+    if success:
+        return {
+            "success": True,
+            "axis": move_data.axis,
+            "delta_deg": move_data.delta_deg,
+        }
+
+    if stm32.last_command_error_code is not None:
+        return JSONResponse(
+            status_code=409,
+            content={
+                "success": False,
+                "error_code": stm32.last_command_error_code,
+                "error": stm32.last_command_error_name,
+            },
+        )
+
+    return JSONResponse(
+        status_code=503,
+        content={
+            "success": False,
+            "error_code": None,
+            "error": "STM32_SET_TARGET_FAILED",
+        },
+    )
+
+
 @app.post("/api/motor/clear-error")
 def motor_clear_error(
     request: Request,
     current_user: User = Depends(get_current_user),
 ):
     stm32: STM32Client = request.app.state.stm32
-    if stm32 is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="STM32가 연결되어 있지 않습니다.",
-    )
 
     success = stm32.clear_error()
+
     if success:
         return {
             "success": True,
@@ -375,16 +423,11 @@ def motor_set_home(
     current_user: User = Depends(get_current_user),
 ):
     stm32: STM32Client = request.app.state.stm32
-    if stm32 is None:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="STM32가 연결되어 있지 않습니다.",
-        )
 
-    success=stm32.set_home()
+    success = stm32.set_home()
 
     if success:
-        return{
+        return {
             "success": True,
             "message": "STM32 HOME saved",
         }
@@ -415,11 +458,6 @@ def motor_move_home(
     current_user: User = Depends(get_current_user),
 ):
     stm32: STM32Client = request.app.state.stm32
-    if stm32 is None:
-                raise HTTPException(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail="STM32가 연결되어 있지 않습니다.",
-            )
 
     success = stm32.move_home()
 
@@ -465,11 +503,6 @@ def save_home_position(
         )
 
     stm32: STM32Client = request.app.state.stm32
-    if stm32 is None:
-                    raise HTTPException(
-                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                        detail="STM32가 연결되어 있지 않습니다.",
-                )
 
     if (
         stm32.current_theta1_deg is None
