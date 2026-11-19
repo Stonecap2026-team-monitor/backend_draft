@@ -47,6 +47,16 @@ class STM32Simulator:
         return True
 
 
+    def move_axis_relative(self, axis, delta_deg):
+        """Simulate the same one-command relative SET_TARGET behavior."""
+        if axis not in (1, 2, 3) or delta_deg not in (-20.0, -10.0, -5.0, 5.0, 10.0, 20.0):
+            return False
+        attr = f"current_theta{axis}_deg"
+        setattr(self, attr, round(getattr(self, attr) + delta_deg, 1))
+        print(f"SIMULATOR SET_TARGET : axis={axis}, delta={delta_deg:+.1f}")
+        return True
+
+
     def set_home(self):
 
         self.home_theta1_deg = self.current_theta1_deg
