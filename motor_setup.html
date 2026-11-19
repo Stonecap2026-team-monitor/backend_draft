@@ -264,9 +264,7 @@
                     </div>
                 </div>
             </div>
-            <div class="preset-cancel-row">
-                <button id="cancel-preset" class="cancel-button" type="button" onclick="cancelPreset()" disabled>추가 명령 중단</button>
-            </div>
+            <p class="footnote">5°·10°·20°는 하나의 목표각 명령으로 전송됩니다. 전송 후 웹에서 이동을 취소할 수 없으므로 실제 비상정지 장치를 준비하세요.</p>
         </section>
     </div>
 
@@ -311,8 +309,6 @@
     let selectedAxis = 1;
     let selectedDirection = null;
     let isBusy = false;
-    let isPresetRunning = false;
-    let stopAfterCurrent = false;
 
     function getToken() {
         return document.getElementById("token").value.trim();
@@ -381,7 +377,6 @@
         document.querySelectorAll(".action-button").forEach(button => {
             button.disabled = isBusy;
         });
-        document.getElementById("cancel-preset").disabled = !isPresetRunning;
     }
 
     function chooseAxis(axis) {
@@ -481,11 +476,28 @@
         }
     }
 
-    function cancelPreset() {
-        if (!isPresetRunning) return;
-        stopAfterCurrent = true;
-        setStatus("연속 JOG 중단 요청: 현재 전송 중인 명령 처리 후 추가 요청을 보내지 않습니다.", "working");
-        appendLog("err", "사용자가 연속 JOG 추가 전송 중단을 요청했습니다.");
+    async function sendPresetMove(axis, deltaDeg) {
+        const token = getToken();
+        if (!token) throw new Error("JWT를 먼저 입력해주세요.");
+        if (![1, 2, 3].includes(axis) || ![-20, -10, -5, 5, 10, 20].includes(deltaDeg)) {
+            throw new Error("허용되지 않는 축 또는 이동 각도입니다.");
+        }
+
+        appendLog("tx", `${axisName(axis)} ${deltaDeg > 0 ? "+" : ""}${deltaDeg}° 단일 SET_TARGET → POST /api/motor/move-relative`);
+        const response = await fetch("/api/motor/move-relative", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "Authorization": "Bearer " + token
+            },
+            body: JSON.stringify({ axis: axis, delta_deg: deltaDeg })
+        });
+        const result = await response.json();
+        if (!response.ok || result.success !== true) {
+            const reason = typeof result.error === "string" ? ` / ${result.error}` : "";
+            throw new Error(`목표각 이동 요청 실패 (HTTP ${response.status}${reason})`);
+        }
+        appendLog("rx", `단일 SET_TARGET 완료 응답 (HTTP ${response.status})`);
     }
 
     async function runPreset(degrees) {
@@ -496,41 +508,27 @@
         }
         const axis = selectedAxis;
         const direction = selectedDirection;
+        const deltaDeg = degrees * direction;
         const approved = window.confirm(
-            `${axisName(axis)} ${directionName(direction)} ${degrees}° 이동을 1° JOG ${degrees}회로 순차 요청합니다.\n` +
-            "먼저 시뮬레이터에서 시험하고, 실제 장비의 안전 범위를 확인하세요. 계속할까요?"
+            `${axisName(axis)} ${directionName(direction)} ${degrees}°를 하나의 SET_TARGET 명령으로 이동 요청합니다.\n` +
+            "전송 후 웹에서 중단할 수 없습니다. 물리적 비상정지 장치와 이동 범위를 확인했습니까?"
         );
         if (!approved) return;
 
         isBusy = true;
-        isPresetRunning = true;
-        stopAfterCurrent = false;
         refreshControlUI();
-        let completed = 0;
         try {
-            appendLog("tx", `${axisName(axis)} ${directionName(direction)} ${degrees}° 회전 명령 시작 (${degrees} × 1° JOG)`);
-            for (let n = 1; n <= degrees; n++) {
-                if (stopAfterCurrent) break;
-                setStatus(`${axisName(axis)} ${directionName(direction)} ${degrees}° 회전 명령 처리 중 (${n}/${degrees})`, "working");
-                await sendOneDegree(axis, direction);
-                completed++;
-                const ok = await refreshMotorPosition(true);
-                if (!ok) throw new Error("각도 조회 실패로 연속 JOG를 중단했습니다.");
-            }
-            if (stopAfterCurrent) {
-                setStatus(`${axisName(axis)} 연속 JOG 중단됨: ${degrees}회 중 ${completed}회 응답 확인`, "working");
-                appendLog("done", `중단됨: ${completed}/${degrees}회 처리`);
-            } else {
-                setStatus(`${axisName(axis)} ${directionName(direction)} ${degrees}° JOG 요청 처리 완료 (${completed}회 응답 확인)`, "success");
-                appendLog("done", `${axisName(axis)} ${directionName(direction)} ${degrees}° 명령 처리 완료 / 현재 명령각 반영`);
-            }
+            setStatus(`${axisName(axis)} ${directionName(direction)} ${degrees}° 단일 이동 명령 처리 중`, "working");
+            await sendPresetMove(axis, deltaDeg);
+            const ok = await refreshMotorPosition(true);
+            if (!ok) throw new Error("명령 완료 응답은 받았으나 현재 명령각 조회에 실패했습니다.");
+            setStatus(`${axisName(axis)} ${directionName(direction)} ${degrees}° 단일 이동 명령 완료 (명령각 확인)`, "success");
+            appendLog("done", `${axisName(axis)} ${directionName(direction)} ${degrees}° 단일 SET_TARGET 처리 완료`);
         } catch (error) {
-            setStatus(`${completed}/${degrees}회 진행 후 중단: ${error.message}`, "error");
-            appendLog("err", `${completed}/${degrees}회 후 실패: ${error.message}`);
+            setStatus(error.message || "목표각 이동 통신 오류", "error");
+            appendLog("err", error.message || "목표각 이동 통신 오류");
         } finally {
             isBusy = false;
-            isPresetRunning = false;
-            stopAfterCurrent = false;
             refreshControlUI();
         }
     }
